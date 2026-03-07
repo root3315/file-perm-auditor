@@ -12,7 +12,7 @@ Ever deployed something only to realize later that your config files were `777`?
 python file_perm_auditor.py /path/to/scan
 ```
 
-That's it. It'll show you all the permission issues it finds.
+That's it. It'll show you all the permission issues it finds with color-coded severity levels.
 
 ## What It Checks
 
@@ -55,6 +55,11 @@ Quiet mode (only show files with issues):
 python file_perm_auditor.py -q /large/directory
 ```
 
+Disable color output (useful for log files):
+```bash
+python file_perm_auditor.py --no-color /var/log
+```
+
 ## Exit Codes
 
 - `0` - No issues found
@@ -73,11 +78,18 @@ The report shows:
 - File path relative to scan target
 - Permission details
 
+Color coding:
+- **Red** - CRITICAL and HIGH severity issues
+- **Yellow** - MEDIUM severity issues
+- **Green** - All clear / no issues
+- **Cyan** - Headers and labels
+
 ## Notes
 
 - Symlinks are skipped (don't follow them by default)
 - Sensitive patterns include: `.ssh`, `id_rsa`, `.env`, `credentials`, `shadow`, etc.
 - Works on Linux and macOS (uses standard `stat` module)
+- Color output is automatically disabled when piping to a file or non-TTY output
 
 ## License
 

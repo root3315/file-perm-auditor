@@ -10,6 +10,15 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
+from colors import (
+    Colors,
+    init_colors,
+    format_header,
+    format_section,
+    format_severity,
+    colorize,
+)
+
 
 SECURITY_ISSUES = {
     "world_writable": {
@@ -76,7 +85,7 @@ def check_sensitive_file(filepath):
 def audit_file(filepath, base_path):
     """Audit a single file for permission issues."""
     issues = []
-    
+
     try:
         file_stat = os.stat(filepath)
     except (OSError, PermissionError) as e:
@@ -85,9 +94,9 @@ def audit_file(filepath, base_path):
             "error": str(e),
             "issues": []
         }
-    
+
     mode = file_stat.st_mode
-    
+
     if stat.S_ISREG(mode) or stat.S_ISDIR(mode):
         for issue_name, issue_info in SECURITY_ISSUES.items():
             if mode & issue_info["mask"]:
@@ -98,7 +107,7 @@ def audit_file(filepath, base_path):
                     "description": issue_info["description"],
                     "path": rel_path
                 })
-        
+
         if stat.S_ISREG(mode) and check_sensitive_file(filepath):
             if mode & (stat.S_IWGRP | stat.S_IWOTH):
                 rel_path = os.path.relpath(filepath, base_path)
@@ -108,7 +117,7 @@ def audit_file(filepath, base_path):
                     "description": "Sensitive file has loose permissions",
                     "path": rel_path
                 })
-    
+
     return {
         "path": filepath,
         "mode_octal": get_permission_octal(mode),
@@ -123,36 +132,36 @@ def scan_directory(target_path, recursive=True, extensions=None):
     """Scan directory for files and audit permissions."""
     results = []
     target = Path(target_path)
-    
+
     if not target.exists():
         print(f"Error: Path '{target_path}' does not exist", file=sys.stderr)
         return results
-    
+
     if target.is_file():
         result = audit_file(str(target), str(target.parent))
         return [result]
-    
+
     if recursive:
         file_iterator = target.rglob("*")
     else:
         file_iterator = target.glob("*")
-    
+
     for filepath in file_iterator:
         try:
             if extensions:
                 if filepath.suffix not in extensions:
                     continue
-            
+
             if filepath.is_symlink():
                 continue
-                
+
             result = audit_file(str(filepath), str(target))
             if result.get("issues") or not result.get("error"):
                 results.append(result)
-                
+
         except (OSError, PermissionError):
             continue
-    
+
     return results
 
 
@@ -161,45 +170,60 @@ def format_report(results, output_format="text"):
     if output_format == "json":
         import json
         return json.dumps(results, indent=2)
-    
+
     lines = []
-    lines.append("=" * 70)
-    lines.append("FILE PERMISSION AUDIT REPORT")
-    lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append("=" * 70)
-    
+    lines.append(format_header("=" * 70))
+    lines.append(format_header("FILE PERMISSION AUDIT REPORT"))
+    lines.append(
+        format_section(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    )
+    lines.append(format_header("=" * 70))
+
     total_files = len(results)
     files_with_issues = sum(1 for r in results if r.get("issues"))
     total_issues = sum(len(r.get("issues", [])) for r in results)
-    
-    lines.append(f"\nSummary: {total_files} files scanned, {files_with_issues} with issues")
-    lines.append(f"Total security issues found: {total_issues}\n")
-    
+
+    lines.append("")
+    summary_text = (
+        f"Summary: {total_files} files scanned, {files_with_issues} with issues"
+    )
+    if files_with_issues > 0:
+        lines.append(colorize(summary_text, Colors.BOLD + Colors.YELLOW))
+    else:
+        lines.append(colorize(summary_text, Colors.GREEN))
+
+    lines.append(colorize(f"Total security issues found: {total_issues}", Colors.BOLD))
+    lines.append("")
+
     severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
     all_issues = []
-    
+
     for result in results:
         for issue in result.get("issues", []):
             all_issues.append(issue)
-    
+
     all_issues.sort(key=lambda x: severity_order.get(x["severity"], 99))
-    
+
     if all_issues:
-        lines.append("-" * 70)
-        lines.append("SECURITY ISSUES (sorted by severity)")
-        lines.append("-" * 70)
-        
+        lines.append(format_section("-" * 70))
+        lines.append(format_header("SECURITY ISSUES (sorted by severity)"))
+        lines.append(format_section("-" * 70))
+
         for issue in all_issues:
-            lines.append(f"\n[{issue['severity']}] {issue['type']}")
-            lines.append(f"  Path: {issue['path']}")
-            lines.append(f"  Description: {issue['description']}")
+            lines.append("")
+            severity_formatted = format_severity(issue["severity"])
+            lines.append(f"{severity_formatted} {colorize(issue['type'], Colors.BOLD)}")
+            lines.append(f"  {colorize('Path:', Colors.CYAN)} {issue['path']}")
+            lines.append(f"  {colorize('Description:', Colors.CYAN)} {issue['description']}")
     else:
-        lines.append("\nNo security issues detected!")
-    
-    lines.append("\n" + "=" * 70)
-    lines.append("END OF REPORT")
-    lines.append("=" * 70)
-    
+        lines.append("")
+        lines.append(colorize("No security issues detected!", Colors.GREEN + Colors.BOLD))
+
+    lines.append("")
+    lines.append(format_section("=" * 70))
+    lines.append(format_header("END OF REPORT"))
+    lines.append(format_section("=" * 70))
+
     return "\n".join(lines)
 
 
@@ -240,23 +264,30 @@ def main():
         action="store_true",
         help="Only show files with issues"
     )
-    
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable color output"
+    )
+
     args = parser.parse_args()
-    
+
+    init_colors(force_color=not args.no_color)
+
     recursive = not args.no_recursive if args.no_recursive else args.recursive
-    
+
     extensions = None
     if args.extensions:
         extensions = [ext if ext.startswith(".") else f".{ext}" for ext in args.extensions]
-    
+
     results = scan_directory(args.path, recursive=recursive, extensions=extensions)
-    
+
     if args.quiet:
         results = [r for r in results if r.get("issues")]
-    
+
     report = format_report(results, output_format=args.format)
     print(report)
-    
+
     issues_count = sum(len(r.get("issues", [])) for r in results)
     sys.exit(0 if issues_count == 0 else 1)
 
